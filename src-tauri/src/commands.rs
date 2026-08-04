@@ -277,29 +277,70 @@ fn list_platform(elevated: bool) -> Result<Vec<PortInfo>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn list_platform(_elevated: bool) -> Result<Vec<PortInfo>, String> {
+fn list_platform(elevated: bool) -> Result<Vec<PortInfo>, String> {
+    let _ = elevated;
     let output = run_output("netstat", &["-ano"])?;
+    let names = tasklist_map();
     let mut out = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let cols: Vec<&str> = line.split_whitespace().collect();
-        if cols.len() >= 5 {
-            let proto = cols[0];
-            if proto == "TCP" || proto == "UDP" {
-                let (local_addr, port) = split_addr_port(cols[1]);
-                out.push(PortInfo {
-                    proto: proto.to_lowercase(),
-                    local_addr,
-                    port,
-                    foreign_addr: cols[2].to_string(),
-                    state: cols[3].to_string(),
-                    pid: cols[4].parse().ok(),
-                    process: None,
-                    fd: None,
-                });
+        if cols.is_empty() {
+            continue;
+        }
+        let proto = cols[0];
+        if proto != "TCP" && proto != "UDP" {
+            continue;
+        }
+        // TCP: Proto Local Foreign State PID | UDP: Proto Local Foreign PID (no State)
+        let (foreign, state, pid) = if proto == "UDP" {
+            if cols.len() < 4 {
+                continue;
+            }
+            (cols[2].to_string(), String::new(), cols[3].parse().ok())
+        } else {
+            if cols.len() < 5 {
+                continue;
+            }
+            (cols[2].to_string(), cols[3].to_string(), cols[4].parse().ok())
+        };
+        let (local_addr, port) = split_addr_port(cols[1]);
+        out.push(PortInfo {
+            proto: proto.to_lowercase(),
+            local_addr,
+            port,
+            foreign_addr: foreign,
+            state,
+            pid,
+            process: pid.and_then(|p| names.get(&p).cloned()),
+            fd: None,
+        });
+    }
+    Ok(out)
+}
+
+#[cfg(target_os = "windows")]
+fn tasklist_map() -> std::collections::HashMap<u32, String> {
+    let mut map = std::collections::HashMap::new();
+    if let Ok(o) = run_output("tasklist", &["/fo", "csv", "/nh"]) {
+        for line in String::from_utf8_lossy(&o.stdout).lines() {
+            // CSV: "image.exe","PID","Session","Session#","Mem"
+            let mut it = line.splitn(2, ',');
+            let name = it.next().unwrap_or("").trim_matches('"').to_string();
+            let pid = it
+                .next()
+                .unwrap_or("")
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim_matches('"')
+                .parse::<u32>()
+                .ok();
+            if let Some(p) = pid {
+                map.insert(p, name);
             }
         }
     }
-    Ok(out)
+    map
 }
 
 #[cfg(target_os = "macos")]

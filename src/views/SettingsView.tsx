@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Eye, EyeOff, KeyRound, Moon, ShieldCheck, ShieldOff, Sun } from "lucide-react";
 import {
   clearSudoPassword,
+  getSystemInfo,
   hasSudoPassword,
   setSudoPassword,
   toErrorMessage,
@@ -21,6 +22,13 @@ export function SettingsView() {
   const [theme, setTheme] = useState<"dark" | "light">(
     () => (localStorage.getItem("portguard:theme") as "dark" | "light") || "dark",
   );
+  const [os, setOs] = useState<string | null>(null);
+
+  useEffect(() => {
+    getSystemInfo()
+      .then((s) => setOs(s.os))
+      .catch(() => setOs(null));
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -76,6 +84,8 @@ export function SettingsView() {
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-2xl space-y-5 p-5">
+        {os !== "windows" && os !== "macos" ? (
+          <>
         {/* Sudo credentials */}
         <section className="rounded-lg border border-line bg-panel p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -159,6 +169,26 @@ export function SettingsView() {
             personal machine.
           </p>
         </section>
+          </>
+        ) : (
+          <section className="rounded-lg border border-line bg-panel p-5">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-dim text-accent ring-1 ring-accent/30">
+                <KeyRound className="h-5 w-5" aria-hidden />
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-ink">Sudo credentials</h2>
+                <p className="text-xs text-ink3">Linux only</p>
+              </div>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-ink2">
+              Password storage is Linux-only. On Windows, firewall and elevated operations require
+              running PortGuard <span className="font-medium text-ink">as Administrator</span>{" "}
+              (right-click → Run as administrator). On macOS they require your user password when
+              prompted.
+            </p>
+          </section>
+        )}
 
         {/* Appearance */}
         <section className="rounded-lg border border-line bg-panel p-5">
