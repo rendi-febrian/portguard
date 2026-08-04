@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { getTauriVersion, getVersion } from "@tauri-apps/api/app";
-import { Download, ExternalLink, Info, Shield, Sparkles } from "lucide-react";
-import { checkForUpdates, getSystemInfo, toErrorMessage, type UpdateResult } from "../lib/tauri";
+import { Download, ExternalLink, Info, Sparkles } from "lucide-react";
+import {
+  checkForUpdates,
+  downloadRelease,
+  getSystemInfo,
+  installRelease,
+  pickAsset,
+  toErrorMessage,
+  type UpdateResult,
+} from "../lib/tauri";
+import { useToast } from "../components/Toast";
 import { Badge, Button, Spinner } from "../components/ui";
 
 const INFO_BASE = "flex items-center justify-between gap-4 rounded-md bg-surface px-3 py-2";
@@ -30,12 +39,14 @@ const TONE_BADGE: Record<string, "accent" | "info" | "neutral" | "danger"> = {
 };
 
 export function AboutView() {
+  const toast = useToast();
   const [version, setVersion] = useState<string>("…");
   const [tauriVersion, setTauriVersion] = useState<string>("…");
   const [sys, setSys] = useState<{ os: string; arch: string } | null>(null);
   const [state, setState] = useState<{ status: "idle" | "checking" } | ({ status: "done" } & UpdateResult)>(
     { status: "idle" }
   );
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -63,6 +74,25 @@ export function AboutView() {
     setState({ status: "done", ...result });
   }, [version]);
 
+  const install = async () => {
+    if (state.status !== "done" || state.kind !== "available" || !sys) return;
+    const asset = pickAsset(sys.os, sys.arch, state.version, state.assets);
+    if (!asset) {
+      toast.error("No installer for this platform", `${sys.os} ${sys.arch} — download it from the release page.`);
+      return;
+    }
+    setUpdating(true);
+    try {
+      const path = await downloadRelease(asset.browser_download_url, asset.name);
+      const msg = await installRelease(path);
+      toast.success("Update downloaded & installed", msg);
+    } catch (err) {
+      toast.error("Update failed", toErrorMessage(err));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const panel = state.status === "done" ? UPDATE_PANEL[state.kind] : null;
   const tone =
     state.status === "done" ? TONE_TEXT[state.kind] : state.status === "checking" ? "text-ink3" : "text-ink3";
@@ -73,9 +103,12 @@ export function AboutView() {
         {/* App */}
         <section className="rounded-lg border border-line bg-panel p-6">
           <div className="flex items-center gap-4">
-            <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-accent-dim text-accent ring-1 ring-accent/30">
-              <Shield className="h-7 w-7" aria-hidden />
-            </span>
+            <img
+              src="/portguard.svg"
+              alt="PortGuard logo"
+              className="h-14 w-14 shrink-0"
+              draggable={false}
+            />
             <div className="min-w-0">
               <h2 className="text-xl font-bold tracking-tight text-ink">PortGuard</h2>
               <p className="text-sm text-ink3">Network port manager for Linux, Windows & macOS</p>
@@ -151,20 +184,37 @@ export function AboutView() {
             </Button>
 
             {state.status === "done" && panel && (
-              <span className={`flex items-center gap-2 text-sm ${tone}`}>
+              <div className={`flex flex-wrap items-center gap-2 text-sm ${tone}`}>
                 <Badge tone={TONE_BADGE[state.kind]}>{state.kind}</Badge>
-                {panel.text}
-                {state.kind === "available" && panel.url && (
-                  <a
-                    href={panel.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-info underline-offset-2 hover:underline"
-                  >
-                    Open release <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                  </a>
+                <span>{panel.text}</span>
+                {state.kind === "available" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updating}
+                      onClick={() => void install()}
+                    >
+                      {updating ? (
+                        <Spinner className="h-3.5 w-3.5" colorClass="text-accent" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      {updating ? "Downloading…" : "Download & Install"}
+                    </Button>
+                    {panel.url && (
+                      <a
+                        href={panel.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-info underline-offset-2 hover:underline"
+                      >
+                        Release page <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                      </a>
+                    )}
+                  </>
                 )}
-              </span>
+              </div>
             )}
           </div>
 

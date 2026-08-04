@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Info, Network, Settings, Shield, ShieldPlus } from "lucide-react";
+import { Info, Network, Settings, ShieldPlus } from "lucide-react";
+import { checkForUpdates } from "./lib/tauri";
+import { useToast } from "./components/Toast";
 import { PortsView } from "./views/PortsView";
 import { FirewallView } from "./views/FirewallView";
 import { AboutView } from "./views/AboutView";
@@ -25,12 +27,37 @@ const TITLES: Record<View, { title: string; sub: string }> = {
 export default function App() {
   const [view, setView] = useState<View>("ports");
   const [version, setVersion] = useState<string>("0.0.1");
+  const toast = useToast();
+  const checked = useRef(false);
 
   useEffect(() => {
     getVersion()
       .then(setVersion)
       .catch(() => setVersion("0.0.1"));
   }, []);
+
+  // Auto-check for updates once on startup
+  useEffect(() => {
+    if (checked.current) return;
+    checked.current = true;
+    let cancelled = false;
+    void (async () => {
+      let v = "0.0.1";
+      try {
+        v = await getVersion();
+      } catch {
+        /* keep fallback */
+      }
+      const result = await checkForUpdates(v);
+      if (cancelled) return;
+      if (result.kind === "available") {
+        toast.info("Update available", `PortGuard v${result.version} — open About to download & install.`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [toast]);
 
   return (
     <div className="flex h-screen min-h-0 overflow-hidden bg-surface text-ink">
@@ -40,9 +67,12 @@ export default function App() {
         className="flex w-56 shrink-0 flex-col border-r border-line bg-panel"
       >
         <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-dim text-accent ring-1 ring-accent/30">
-            <Shield className="h-4.5 w-4.5" aria-hidden />
-          </span>
+          <img
+            src="/portguard.svg"
+            alt="PortGuard logo"
+            className="h-8 w-8"
+            draggable={false}
+          />
           <div>
             <p className="text-sm leading-tight font-bold tracking-tight text-ink">PortGuard</p>
             <p className="text-2xs text-ink3">Network port manager</p>

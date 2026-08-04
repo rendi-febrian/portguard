@@ -85,6 +85,28 @@
 }
 
 @layer base {
+  html.light {
+    --color-surface: #f4f6f5;
+    --color-panel: #ffffff;
+    --color-raise: #edf1ef;
+    --color-hover: #e3e8e5;
+    --color-line: #d4dcd7;
+    --color-line2: #b7c2bc;
+    --color-ink: #14201a;
+    --color-ink2: #48554e;
+    --color-ink3: #79867f;
+    --color-accent: #0d9f6e;
+    --color-accent-ink: #f0fbf6;
+    --color-accent-dim: #d4f3e5;
+    --color-info: #0369a1;
+    --color-info-dim: #e0f2fe;
+    --color-warn: #b45309;
+    --color-warn-dim: #fef3c7;
+    --color-danger: #dc2626;
+    --color-danger-dim: #fee2e2;
+    --color-danger-solid: #dc2626;
+  }
+
   html,
   body,
   #root {

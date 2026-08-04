@@ -1,5 +1,14 @@
-import { Copy, X, XCircle } from "lucide-react";
-import type { PortInfo } from "../../lib/tauri";
+import { useEffect, useState } from "react";
+import { Copy, Globe, Loader2, X, XCircle, Zap } from "lucide-react";
+import {
+  openUrl,
+  probePort,
+  processDetail,
+  serviceName,
+  toErrorMessage,
+  type PortInfo,
+  type ProcessDetail,
+} from "../../lib/tauri";
 import { useToast } from "../Toast";
 import { Badge, Button } from "../ui";
 
@@ -20,6 +29,13 @@ function Field({
   );
 }
 
+const WILDCARDS = ["0.0.0.0", "::", "*", "0:0:0:0:0:0:0:0"];
+
+function connectHost(local_addr: string): string {
+  const host = WILDCARDS.includes(local_addr) ? "127.0.0.1" : local_addr;
+  return host.includes(":") ? `[${host}]` : host;
+}
+
 interface PortDetailProps {
   port: PortInfo;
   onClose: () => void;
@@ -28,11 +44,47 @@ interface PortDetailProps {
 
 export function PortDetail({ port, onClose, onKill }: PortDetailProps) {
   const toast = useToast();
+  const [detail, setDetail] = useState<ProcessDetail | null>(null);
+  const [probe, setProbe] = useState<null | "checking" | "open" | "closed">(null);
+
+  useEffect(() => {
+    if (port.pid == null) return;
+    let cancelled = false;
+    void processDetail(port.pid)
+      .then((d) => {
+        if (!cancelled) setDetail(d);
+      })
+      .catch(() => {
+        /* /proc may be gone */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [port.pid]);
 
   const copyAddr = () => {
     void navigator.clipboard.writeText(port.local_addr).then(() => {
       toast.info("Copied", port.local_addr);
     });
+  };
+
+  const open = () => {
+    const url = `http://${connectHost(port.local_addr)}:${port.port}`;
+    void openUrl(url)
+      .then(() => toast.info("Opened in browser", url))
+      .catch((err) => toast.error("Could not open browser", toErrorMessage(err)));
+  };
+
+  const test = async () => {
+    setProbe("checking");
+    try {
+      const ok = await probePort(WILDCARDS.includes(port.local_addr) ? "127.0.0.1" : port.local_addr, port.port);
+      setProbe(ok ? "open" : "closed");
+      toast[ok ? "success" : "error"](ok ? "Port is open" : "No response", `Port ${port.port}`);
+    } catch (err) {
+      setProbe("closed");
+      toast.error("Probe failed", toErrorMessage(err));
+    }
   };
 
   return (
@@ -43,9 +95,10 @@ export function PortDetail({ port, onClose, onKill }: PortDetailProps) {
       <header className="flex items-start justify-between gap-2 border-b border-line px-4 py-3">
         <div>
           <p className="font-mono text-xl font-semibold text-accent tabular-nums">{port.port}</p>
-          <div className="mt-1 flex items-center gap-1.5">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Badge tone={port.proto === "tcp" ? "tcp" : "udp"}>{port.proto}</Badge>
             <Badge>{port.state || "—"}</Badge>
+            {serviceName(port.port) && <Badge tone="info">{serviceName(port.port)}</Badge>}
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close details">
@@ -58,9 +111,38 @@ export function PortDetail({ port, onClose, onKill }: PortDetailProps) {
         <Field label="PID" value={port.pid == null ? "—" : String(port.pid)} />
         <Field label="Local address" value={port.local_addr} />
         <Field label="Foreign address" value={port.foreign_addr || "—"} />
+
+        {detail && (
+          <>
+            <Field label="User" mono={false} value={detail.user ?? "—"} />
+            <Field label="Memory (RSS)" value={detail.memory_kb == null ? "—" : `${(detail.memory_kb / 1024).toFixed(1)} MB`} />
+            {detail.exe && <Field label="Executable" value={detail.exe} />}
+            {detail.cmdline && <Field label="Command" value={detail.cmdline} />}
+          </>
+        )}
+        {port.pid != null && !detail && (
+          <p className="flex items-center gap-2 text-xs text-ink3">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading process info…
+          </p>
+        )}
       </dl>
 
       <footer className="space-y-2 border-t border-line p-4">
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" size="md" onClick={open}>
+            <Globe className="h-3.5 w-3.5" /> Open
+          </Button>
+          <Button variant="outline" size="md" onClick={() => void test()} disabled={probe === "checking"}>
+            {probe === "checking" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Zap className="h-3.5 w-3.5" />
+            )}
+            Test
+          </Button>
+        </div>
+        {probe === "open" && <p className="text-xs text-accent">Port responds to TCP connections.</p>}
+        {probe === "closed" && <p className="text-xs text-danger">No response on this port.</p>}
         <Button variant="outline" size="md" className="w-full" onClick={copyAddr}>
           <Copy className="h-3.5 w-3.5" /> Copy local address
         </Button>

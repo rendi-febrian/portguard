@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Info, RefreshCw, Shield, ShieldPlus } from "lucide-react";
+import { Info, Power, RefreshCw, Shield, ShieldPlus, Trash2 } from "lucide-react";
 import {
+  deleteFirewallRule,
   firewallAllow,
   getFirewallStatus,
-  isValidIp,
+  isValidIpOrCidr,
   listFirewallRules,
-  parsePort,
+  parsePortRange,
+  setFirewallEnabled,
   toErrorMessage,
   type FirewallRule,
   type FirewallStatus,
@@ -79,9 +81,9 @@ export function FirewallView() {
   }, [loadRules]);
 
   const validateIp = (v: string) =>
-    v.trim() === "" ? "IP address is required." : isValidIp(v) ? undefined : "Enter a valid IPv4 or IPv6 address.";
+    v.trim() === "" ? "IP or subnet is required." : isValidIpOrCidr(v) ? undefined : "Enter a valid IPv4/IPv6 address or CIDR (e.g. 192.168.1.0/24).";
   const validatePort = (v: string) =>
-    v.trim() === "" ? "Port is required." : parsePort(v) === null ? "Port must be an integer between 1 and 65535." : undefined;
+    v.trim() === "" ? "Port is required." : parsePortRange(v) === null ? "Port must be 1-65535 or a range like 3000-3010." : undefined;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -92,7 +94,7 @@ export function FirewallView() {
 
     setPending(true);
     try {
-      const msg = await firewallAllow(ip.trim(), parsePort(port)!, proto);
+      const msg = await firewallAllow(ip.trim(), parsePortRange(port)!, proto);
       toast.success("Rule added", msg);
       setIp("");
       setPort("");
@@ -100,6 +102,29 @@ export function FirewallView() {
       toast.error("Could not add rule", toErrorMessage(err));
     } finally {
       setPending(false);
+    }
+  };
+
+  const toggleEnabled = async () => {
+    if (!status) return;
+    try {
+      const msg = await setFirewallEnabled(!status.enabled);
+      toast.success(status.enabled ? "Firewall disabled" : "Firewall enabled", msg);
+      setStatus(await getFirewallStatus());
+      void loadRules(true);
+    } catch (err) {
+      toast.error("Could not change firewall state", toErrorMessage(err));
+    }
+  };
+
+  const removeRule = async (rule: FirewallRule) => {
+    if (!window.confirm(`Delete firewall rule?\n\n${rule.spec}`)) return;
+    try {
+      const msg = await deleteFirewallRule(rule.spec);
+      toast.success("Rule deleted", msg);
+      void loadRules(true);
+    } catch (err) {
+      toast.error("Could not delete rule", toErrorMessage(err));
     }
   };
 
@@ -122,6 +147,17 @@ export function FirewallView() {
               <Badge tone={status.enabled ? "accent" : "warn"}>
                 {status.backend} · {status.enabled ? "active" : "inactive"}
               </Badge>
+            )}
+            {status && (
+              <Button
+                variant={status.enabled ? "outline" : "primary"}
+                size="sm"
+                onClick={() => void toggleEnabled()}
+                aria-label={status.enabled ? "Disable firewall" : "Enable firewall"}
+              >
+                <Power className="h-3.5 w-3.5" />
+                {status.enabled ? "Disable" : "Enable"}
+              </Button>
             )}
             <Button
               variant="outline"
@@ -155,7 +191,7 @@ export function FirewallView() {
                   inputMode="text"
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="e.g. 192.168.1.50 or 2001:db8::1"
+                  placeholder="e.g. 192.168.1.50, 2001:db8::1, or 192.168.1.0/24"
                   value={ip}
                   onChange={(e) => setIp(e.currentTarget.value)}
                   onBlur={() => setErrors((er) => ({ ...er, ip: validateIp(ip) }))}
@@ -179,7 +215,7 @@ export function FirewallView() {
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
-                  placeholder="e.g. 8080"
+                  placeholder="e.g. 8080 or 3000-3010"
                   value={port}
                   onChange={(e) => setPort(e.currentTarget.value)}
                   onBlur={() => setErrors((er) => ({ ...er, port: validatePort(port) }))}
@@ -283,6 +319,15 @@ export function FirewallView() {
                         {r.ip && <Badge tone="info">{r.ip}</Badge>}
                         {r.port !== null && <Badge tone="neutral">:{r.port}</Badge>}
                         {r.proto && <Badge tone="udp">{r.proto}</Badge>}
+                        <button
+                          type="button"
+                          onClick={() => void removeRule(r)}
+                          aria-label={`Delete rule: ${r.spec}`}
+                          title="Delete rule"
+                          className="ml-auto rounded p-1 text-ink3 transition-colors hover:bg-hover hover:text-danger"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                       <code className="break-all font-mono text-2xs text-ink2">{r.spec}</code>
                     </li>

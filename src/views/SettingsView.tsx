@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Eye, EyeOff, KeyRound, ShieldCheck, ShieldOff } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Moon, ShieldCheck, ShieldOff, Sun } from "lucide-react";
 import {
   clearSudoPassword,
   hasSudoPassword,
@@ -18,6 +18,14 @@ export function SettingsView() {
   const [password, setPassword] = useState("");
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">(
+    () => (localStorage.getItem("portguard:theme") as "dark" | "light") || "dark",
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", theme === "light");
+    localStorage.setItem("portguard:theme", theme);
+  }, [theme]);
 
   const load = useCallback(async () => {
     try {
@@ -34,7 +42,7 @@ export function SettingsView() {
   const save = async (e: FormEvent) => {
     e.preventDefault();
     if (!password) {
-      toast.error("Password kosong", "Isi password sudo dulu sebelum menyimpan.");
+      toast.error("Empty password", "Enter the sudo password before saving.");
       return;
     }
     setSaving(true);
@@ -43,10 +51,10 @@ export function SettingsView() {
       setPassword("");
       setReveal(false);
       setStored(await hasSudoPassword());
-      toast.success("Tersimpan", "Password sudo disimpan di keyring OS (terenkripsi).");
+      toast.success("Stored", "Sudo password saved to the OS keyring (encrypted).");
       await load();
     } catch (err) {
-      toast.error("Gagal menyimpan", toErrorMessage(err));
+      toast.error("Could not save", toErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -57,9 +65,9 @@ export function SettingsView() {
     try {
       await clearSudoPassword();
       setStored(false);
-      toast.success("Dihapus", "Password sudo dihapus dari keyring.");
+      toast.success("Removed", "Sudo password deleted from the keyring.");
     } catch (err) {
-      toast.error("Gagal menghapus", toErrorMessage(err));
+      toast.error("Could not remove", toErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -77,7 +85,7 @@ export function SettingsView() {
               </span>
               <div>
                 <h2 className="text-base font-semibold text-ink">Sudo credentials</h2>
-                <p className="text-xs text-ink3">Password untuk operasi elevated</p>
+                <p className="text-xs text-ink3">Password for elevated operations</p>
               </div>
             </div>
             {stored === null ? (
@@ -86,11 +94,11 @@ export function SettingsView() {
               <Badge tone={stored ? "accent" : "neutral"}>
                 {stored ? (
                   <>
-                    <ShieldCheck className="mr-1 h-3 w-3" aria-hidden /> Tersimpan
+                    <ShieldCheck className="mr-1 h-3 w-3" aria-hidden /> Stored
                   </>
                 ) : (
                   <>
-                    <ShieldOff className="mr-1 h-3 w-3" aria-hidden /> Belum disimpan
+                    <ShieldOff className="mr-1 h-3 w-3" aria-hidden /> Not stored
                   </>
                 )}
               </Badge>
@@ -98,16 +106,16 @@ export function SettingsView() {
           </div>
 
           <p className="mt-3 text-sm leading-relaxed text-ink2">
-            Simpan password sudo ke <span className="font-mono">keyring OS</span> sekali. Setelah
-            itu semua operasi yang butuh root — daftar PID, firewall, kill — jalan otomatis{" "}
-            <span className="font-medium text-ink">tanpa prompt</span>. Password tersimpan
-            terenkripsi, bukan file plaintext.
+            Store the sudo password in the OS <span className="font-mono">keyring</span> once. After
+            that, every operation that needs root — listing PIDs, firewall, kill — runs automatically{" "}
+            <span className="font-medium text-ink">without a prompt</span>. The password is stored
+            encrypted, not in a plaintext file.
           </p>
 
           <form noValidate onSubmit={(e) => void save(e)} className="mt-5 space-y-4">
             <div>
               <label htmlFor="sudo-pw" className="mb-1.5 block text-xs font-medium text-ink2">
-                Password sudo
+                Sudo password
               </label>
               <div className="relative">
                 <input
@@ -121,7 +129,7 @@ export function SettingsView() {
                 />
                 <button
                   type="button"
-                  aria-label={reveal ? "Sembunyikan password" : "Tampilkan password"}
+                  aria-label={reveal ? "Hide password" : "Show password"}
                   onClick={() => setReveal((r) => !r)}
                   className="absolute top-1/2 right-2 -translate-y-1/2 text-ink3 hover:text-ink"
                 >
@@ -133,22 +141,59 @@ export function SettingsView() {
             <div className="flex flex-wrap items-center gap-2">
               <Button type="submit" variant="primary" size="md" disabled={saving}>
                 {saving ? <Spinner className="h-4 w-4" colorClass="text-accent-ink" /> : <KeyRound className="h-4 w-4" />}
-                Simpan
+                Save
               </Button>
               {stored && (
                 <Button variant="danger" size="md" onClick={() => void clear()} disabled={saving}>
                   <ShieldOff className="h-4 w-4" />
-                  Hapus
+                  Remove
                 </Button>
               )}
             </div>
           </form>
 
           <p className="mt-4 flex items-start gap-2 border-t border-line pt-3 text-xs leading-relaxed text-ink3">
-            Jika password tidak disimpan, PortGuard di balik layar memakai{" "}
-            <span className="font-mono">pkexec</span> — muncul prompt otorisasi sistem tiap
-            operasi elevated. Menyimpan password cuma disarankan di mesin pribadi aman.
+            If no password is stored, PortGuard falls back to{" "}
+            <span className="font-mono">pkexec</span>, showing a system authorization prompt on
+            every elevated operation. Storing the password is only recommended on a trusted
+            personal machine.
           </p>
+        </section>
+
+        {/* Appearance */}
+        <section className="rounded-lg border border-line bg-panel p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-dim text-accent ring-1 ring-accent/30">
+                {theme === "light" ? (
+                  <Sun className="h-5 w-5" aria-hidden />
+                ) : (
+                  <Moon className="h-5 w-5" aria-hidden />
+                )}
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-ink">Appearance</h2>
+                <p className="text-xs text-ink3">Theme preference, saved locally</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex max-w-xs overflow-hidden rounded-md border border-line">
+            {(["dark", "light"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTheme(t)}
+                aria-pressed={theme === t}
+                className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium transition-colors ${
+                  theme === t ? "bg-accent-dim text-accent" : "bg-raise text-ink2 hover:text-ink"
+                }`}
+              >
+                {t === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+                {t === "dark" ? "Dark" : "Light"}
+              </button>
+            ))}
+          </div>
         </section>
       </div>
     </div>

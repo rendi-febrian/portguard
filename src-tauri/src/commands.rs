@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const KEYRING_SERVICE: &str = "com.rendifebrian.portguard";
 const KEYRING_SUDO: &str = "sudo-password";
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PortInfo {
     pub proto: String,
     pub local_addr: String,
@@ -31,8 +31,8 @@ pub struct FirewallStatus {
 pub fn firewall_status() -> FirewallStatus {
     #[cfg(target_os = "linux")]
     {
-        // State beneran ufw ada di /etc/ufw/ufw.conf (ENABLED=yes|no), readable tanpa root.
-        // systemctl is-active ufw nggak akurat — unit bisa aktif walau firewall mati.
+        // Real ufw state lives in /etc/ufw/ufw.conf (ENABLED=yes|no), readable without root.
+        // systemctl is-active ufw is unreliable — the unit can be active while the firewall is off.
         if let Ok(conf) = std::fs::read_to_string("/etc/ufw/ufw.conf") {
             return FirewallStatus {
                 backend: "ufw".to_string(),
@@ -91,7 +91,7 @@ fn run_output(cmd: &str, args: &[&str]) -> Result<std::process::Output, String> 
     std::process::Command::new(cmd)
         .args(args)
         .output()
-        .map_err(|e| format!("gagal jalankan {}: {}", cmd, e))
+        .map_err(|e| format!("failed to run {}: {}", cmd, e))
 }
 
 // ---- Elevated execution (Linux) ----
@@ -105,8 +105,8 @@ fn sudo_password() -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn run_elevated(bin: &str, args: &[&str]) -> Result<std::process::Output, String> {
-    // Kalau password sudo tersimpan di keyring -> sudo -S (tanpa prompt).
-    // Kalau tidak -> fallback pkexec (prompt otorisasi GUI).
+    // If a sudo password is stored in the keyring -> sudo -S (no prompt).
+    // Otherwise fall back to pkexec (GUI authorization prompt).
     if let Some(pw) = sudo_password() {
         use std::io::Write;
         let mut cmd = std::process::Command::new("sudo");
@@ -117,19 +117,19 @@ fn run_elevated(bin: &str, args: &[&str]) -> Result<std::process::Output, String
         cmd.stderr(std::process::Stdio::piped());
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("gagal jalankan sudo: {}", e))?;
+            .map_err(|e| format!("failed to run sudo: {}", e))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(format!("{}\n", pw).as_bytes());
         }
         let out = child
             .wait_with_output()
-            .map_err(|e| format!("sudo gagal: {}", e))?;
+            .map_err(|e| format!("sudo failed: {}", e))?;
         return Ok(out);
     }
     let mut cmd = std::process::Command::new("pkexec");
     cmd.arg(bin).args(args);
     cmd.output()
-        .map_err(|e| format!("gagal jalankan pkexec: {}", e))
+        .map_err(|e| format!("failed to run pkexec: {}", e))
 }
 
 #[tauri::command]
@@ -137,16 +137,16 @@ pub fn set_sudo_password(password: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SUDO)
-            .map_err(|e| format!("keyring tidak tersedia: {}", e))?;
+            .map_err(|e| format!("keyring unavailable: {}", e))?;
         entry
             .set_password(&password)
-            .map_err(|e| format!("gagal menyimpan di keyring: {}", e))?;
+            .map_err(|e| format!("failed to store in keyring: {}", e))?;
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = password;
-        Err("Penyimpanan password sudo didukung di Linux saja".to_string())
+        Err("Sudo password storage is only supported on Linux".to_string())
     }
 }
 
@@ -155,15 +155,15 @@ pub fn clear_sudo_password() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SUDO)
-            .map_err(|e| format!("keyring tidak tersedia: {}", e))?;
+            .map_err(|e| format!("keyring unavailable: {}", e))?;
         entry
             .delete_credential()
-            .map_err(|e| format!("gagal menghapus: {}", e))?;
+            .map_err(|e| format!("failed to delete: {}", e))?;
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Err("Penyimpanan password sudo didukung di Linux saja".to_string())
+        Err("Sudo password storage is only supported on Linux".to_string())
     }
 }
 
@@ -257,8 +257,8 @@ fn parse_ss_line(line: &str) -> Option<PortInfo> {
 
 #[cfg(target_os = "linux")]
 fn list_platform(elevated: bool) -> Result<Vec<PortInfo>, String> {
-    // ss -tulpn = tcp + udp listening dalam satu pemanggilan; proto di-infer dari state.
-    // Elevated biar PID proses root/system kebaca.
+    // ss -tulpn = tcp + udp listening in one call; proto inferred from state.
+    // Elevated so root/system PIDs are visible.
     let output = if elevated {
         run_elevated("ss", &["-tulpn"])?
     } else {
@@ -356,25 +356,31 @@ fn kill_platform(pid: u32) -> Result<std::process::Output, String> {
 pub fn kill_port(pid: u32) -> Result<String, String> {
     let output = kill_platform(pid)?;
     if output.status.success() {
-        Ok(format!("Proses {} berhasil dihentikan", pid))
+        Ok(format!("Process {} terminated successfully", pid))
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
 }
 
 #[tauri::command]
-pub fn firewall_allow(ip: String, port: u16, proto: String) -> Result<String, String> {
+pub fn firewall_allow(ip: String, port: String, proto: String) -> Result<String, String> {
     if ip.trim().is_empty() {
-        return Err("IP tidak boleh kosong".to_string());
+        return Err("IP must not be empty".to_string());
     }
     let proto = proto.to_lowercase();
     if proto != "tcp" && proto != "udp" {
-        return Err("Proto harus tcp atau udp".to_string());
+        return Err("Protocol must be tcp or udp".to_string());
     }
+    // port bisa single ("8080") atau range ("3000-3010"/"3000:3010")
+    let p = normalize_port(port.trim());
+    if let Err(e) = &p {
+        return Err(e.clone());
+    }
+    let port_arg = p.unwrap();
 
     #[cfg(target_os = "linux")]
     {
-        // ufw butuh root — elevated (sudo dari keyring) atau fallback pkexec prompt
+        // ufw needs root — elevated (sudo from keyring) or pkexec prompt fallback
         let args = [
             "allow",
             "from",
@@ -382,13 +388,13 @@ pub fn firewall_allow(ip: String, port: u16, proto: String) -> Result<String, St
             "to",
             "any",
             "port",
-            &port.to_string(),
+            &port_arg, // ufw range syntax: 3000:3010
             "proto",
             &proto,
         ];
         let output = run_elevated("ufw", &args)?;
         if output.status.success() {
-            Ok(format!("Firewall: izinkan {} ke port {} {}", ip, port, proto))
+            Ok(format!("Firewall: allow {} to port {} {}", ip, port, proto))
         } else {
             Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
         }
@@ -397,6 +403,7 @@ pub fn firewall_allow(ip: String, port: u16, proto: String) -> Result<String, St
     #[cfg(target_os = "windows")]
     {
         let rule_name = format!("PortGuard Allow {} {} {}", ip, port, proto);
+        let localport = port_arg.replace(':', "-"); // netsh range syntax: 3000-3010
         let rules = [
             "advfirewall",
             "firewall",
@@ -406,12 +413,12 @@ pub fn firewall_allow(ip: String, port: u16, proto: String) -> Result<String, St
             "dir=in",
             "action=allow",
             &format!("remoteip={}", ip),
-            &format!("localport={}", port),
+            &format!("localport={}", localport),
             &format!("protocol={}", proto),
         ];
         let output = run_output("netsh", &rules)?;
         if output.status.success() {
-            Ok(format!("Firewall: izinkan {} ke port {} {}", ip, port, proto))
+            Ok(format!("Firewall: allow {} to port {} {}", ip, port, proto))
         } else {
             Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
         }
@@ -419,10 +426,353 @@ pub fn firewall_allow(ip: String, port: u16, proto: String) -> Result<String, St
 
     #[cfg(target_os = "macos")]
     {
-        // pfctl butuh konfigurasi anchor; belum diotomasi penuh
-        let _ = (ip, port, proto);
-        Err("macOS: aturan firewall via pfctl belum diotomasi — pakai PF/PFConf manual".to_string())
+        let _ = (ip, port, proto, port_arg);
+        Err("macOS firewall automation is not supported yet".to_string())
     }
+}
+
+/// Normalize a port input to ufw syntax: single "8080" or range "3000:3010".
+fn normalize_port(raw: &str) -> Result<String, String> {
+    let v = raw.trim();
+    if v.is_empty() {
+        return Err("Port must not be empty".to_string());
+    }
+    fn valid(p: &str) -> bool {
+        match p.parse::<u16>() {
+            Ok(n) => n >= 1,
+            Err(_) => false,
+        }
+    }
+    if valid(v) {
+        return Ok(v.to_string());
+    }
+    if let Some(sep) = v.find(|c| c == '-' || c == ':') {
+        let (a, b) = (v[..sep].trim(), v[sep + 1..].trim());
+        if !a.is_empty() && !b.is_empty() && valid(a) && valid(b) && a.parse::<u16>().unwrap() <= b.parse::<u16>().unwrap() {
+            return Ok(format!("{}:{}", a, b));
+        }
+    }
+    Err(format!("Invalid port or range: {}", v))
+}
+
+/// Delete a firewall rule. On Linux `spec` is the ufw line (e.g. "ufw allow from ... to any port 3000 proto tcp").
+#[tauri::command]
+pub fn delete_firewall_rule(spec: String) -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let tokens: Vec<&str> = spec.split_whitespace().collect();
+        if tokens.first() == Some(&"ufw") && tokens.len() >= 2 {
+            let mut args = Vec::with_capacity(tokens.len() + 1);
+            args.push("delete");
+            args.extend_from_slice(&tokens[1..]);
+            let output = run_elevated("ufw", &args)?;
+            if output.status.success() {
+                return Ok(format!("Rule deleted: {}", spec));
+            }
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        Err("Unrecognized firewall rule".to_string())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let output = run_output(
+            "netsh",
+            &["advfirewall", "firewall", "delete", "rule", &format!("name={}", spec)],
+        )?;
+        if output.status.success() {
+            Ok(format!("Rule deleted: {}", spec))
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = spec;
+        Err("Rule deletion is not supported on macOS yet".to_string())
+    }
+}
+
+/// Enable or disable the native firewall (UFW on Linux, Windows Defender Firewall on Windows).
+#[tauri::command]
+pub fn set_firewall_enabled(enabled: bool) -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let action = if enabled { "enable" } else { "disable" };
+        let output = run_elevated("ufw", &[action])?;
+        if output.status.success() {
+            Ok(format!("UFW {}", action))
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let state = if enabled { "on" } else { "off" };
+        let output = run_output("netsh", &["advfirewall", "set", "allprofiles", "state", state])?;
+        if output.status.success() {
+            Ok(format!("Firewall {}", state))
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = enabled;
+        Err("Firewall toggle is not supported on macOS yet".to_string())
+    }
+}
+
+// ---- Ports: connections, probe, open, process detail, export ----
+
+/// All TCP/UDP sockets (listening + established), same parser as list_ports.
+#[tauri::command]
+pub fn list_connections(elevated: bool) -> Result<Vec<PortInfo>, String> {
+    let output = if elevated {
+        run_elevated("ss", &["-tunp"])?
+    } else {
+        run_output("ss", &["-tunp"])?
+    };
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let mut out = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some(p) = parse_ss_line(line) {
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
+/// TCP connect probe — true if something answers on host:port within 1.5s.
+#[tauri::command]
+pub fn probe_port(host: String, port: u16) -> Result<bool, String> {
+    use std::net::ToSocketAddrs;
+    use std::time::Duration;
+    let addr = format!("{}:{}", host, port);
+    let addrs: Vec<_> = addr
+        .to_socket_addrs()
+        .map_err(|e| format!("Failed to resolve {}: {}", addr, e))?
+        .collect();
+    for a in addrs {
+        if std::net::TcpStream::connect_timeout(&a, Duration::from_millis(1500)).is_ok() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Open a URL in the default browser.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let o = run_output("xdg-open", &[&url])?;
+        if o.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&o.stderr).trim().to_string())
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let o = run_output("open", &[&url])?;
+        if o.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&o.stderr).trim().to_string())
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let o = run_output("cmd", &["/c", "start", "", &url])?;
+        if o.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&o.stderr).trim().to_string())
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ProcessDetail {
+    pub pid: u32,
+    pub name: Option<String>,
+    pub user: Option<String>,
+    pub cmdline: Option<String>,
+    pub exe: Option<String>,
+    pub memory_kb: Option<u64>,
+}
+
+#[cfg(target_os = "linux")]
+fn uid_to_name(uid: u32) -> String {
+    if let Ok(pw) = std::fs::read_to_string("/etc/passwd") {
+        for line in pw.lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 3 && parts[2].parse::<u32>().ok() == Some(uid) {
+                return parts[0].to_string();
+            }
+        }
+    }
+    uid.to_string()
+}
+
+/// Process details from /proc (Linux). macOS/Windows return an error for now.
+#[tauri::command]
+pub fn process_detail(pid: u32) -> Result<ProcessDetail, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let base = format!("/proc/{}", pid);
+        let mut d = ProcessDetail {
+            pid,
+            name: None,
+            user: None,
+            cmdline: None,
+            exe: None,
+            memory_kb: None,
+        };
+        if let Ok(status) = std::fs::read_to_string(format!("{}/status", base)) {
+            for line in status.lines() {
+                if let Some(v) = line.strip_prefix("Name:") {
+                    d.name = Some(v.trim().to_string());
+                } else if let Some(v) = line.strip_prefix("Uid:") {
+                    let uid = v
+                        .split_whitespace()
+                        .next()
+                        .and_then(|s| s.parse::<u32>().ok());
+                    d.user = uid.map(uid_to_name);
+                } else if let Some(v) = line.strip_prefix("VmRSS:") {
+                    d.memory_kb = v.split_whitespace().next().and_then(|s| s.parse().ok());
+                }
+            }
+        }
+        if let Ok(c) = std::fs::read(format!("{}/cmdline", base)) {
+            let first: Vec<u8> = c.into_iter().take_while(|&b| b != 0).collect();
+            d.cmdline = Some(String::from_utf8_lossy(&first).to_string());
+        }
+        if let Ok(exe) = std::fs::read_link(format!("{}/exe", base)) {
+            d.exe = Some(exe.to_string_lossy().to_string());
+        }
+        Ok(d)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        Err("Process detail is only available on Linux".to_string())
+    }
+}
+
+fn home_dir() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("USERPROFILE").ok()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("HOME").ok()
+    }
+}
+
+/// Export the current port list to ~/Downloads as CSV or JSON. Returns the saved path.
+#[tauri::command]
+pub fn export_ports(ports: Vec<PortInfo>, format: String) -> Result<String, String> {
+    let home = home_dir().ok_or("Could not determine your home directory".to_string())?;
+    let dir = format!("{}/Downloads", home);
+    let _ = std::fs::create_dir_all(&dir);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let fmt = if format == "json" { "json" } else { "csv" };
+    let path = format!("{}/portguard-{}.{}", dir, ts, fmt);
+    let content = if fmt == "json" {
+        serde_json::to_string_pretty(&ports).map_err(|e| e.to_string())?
+    } else {
+        ports_to_csv(&ports)
+    };
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write {}: {}", path, e))?;
+    Ok(path)
+}
+
+/// Download a release asset into ~/Downloads. Returns the saved path.
+#[tauri::command]
+pub fn download_release(url: String, dest_name: String) -> Result<String, String> {
+    let home = home_dir().ok_or("Could not determine your home directory".to_string())?;
+    let dir = format!("{}/Downloads", home);
+    let _ = std::fs::create_dir_all(&dir);
+    let dest = format!("{}/{}", dir, dest_name);
+    let output = run_output("curl", &["-fSL", "--max-time", "300", "-o", &dest, &url])?;
+    if output.status.success() {
+        Ok(dest)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+/// Install a downloaded release artifact (elevated where needed).
+#[tauri::command]
+pub fn install_release(path: String) -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        if path.ends_with(".deb") {
+            let out = run_elevated("dpkg", &["-i", &path])?;
+            if out.status.success() {
+                return Ok("Installed. Restart the app to use the new version.".to_string());
+            }
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        if path.ends_with(".AppImage") {
+            let _ = run_output("chmod", &["+x", &path]);
+            return Ok(format!("AppImage ready to run: {}", path));
+        }
+        Err("Unsupported installer for Linux".to_string())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if path.ends_with(".msi") {
+            let _ = run_output("msiexec", &["/i", &path]);
+            Ok("MSI installer launched.".to_string())
+        } else if path.ends_with(".exe") {
+            let _ = run_output("cmd", &["/c", "start", "", &path]);
+            Ok("Installer launched.".to_string())
+        } else {
+            Err("Unsupported installer for Windows".to_string())
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if path.ends_with(".dmg") {
+            let _ = run_output("open", &[&path]);
+            Ok("DMG mounted — drag the app to Applications.".to_string())
+        } else {
+            Err("Unsupported installer for macOS".to_string())
+        }
+    }
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn ports_to_csv(ports: &[PortInfo]) -> String {
+    let mut out = String::from("proto,local_addr,port,foreign_addr,state,pid,process\n");
+    for p in ports {
+        out.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            p.proto,
+            csv_escape(&p.local_addr),
+            p.port,
+            csv_escape(&p.foreign_addr),
+            p.state,
+            p.pid.map(|x| x.to_string()).unwrap_or_default(),
+            p.process.as_deref().map(csv_escape).unwrap_or_default()
+        ));
+    }
+    out
 }
 
 fn parse_ufw_rules(out: &str) -> Vec<FirewallRule> {
@@ -493,7 +843,7 @@ fn list_firewall_platform(elevated: bool) -> Result<Vec<FirewallRule>, String> {
     }
     if !elevated {
         return Err(
-            "Membaca aturan ufw butuh akses root — klik \"Load as admin\" untuk meminta otorisasi"
+            "Reading ufw rules requires root access — click \"Load as admin\" to request authorization"
                 .to_string(),
         );
     }
@@ -660,6 +1010,28 @@ mod tests {
         .unwrap();
         assert_eq!(p.pid, None);
         assert_eq!(p.process, None);
+    }
+
+    #[test]
+    fn normalizes_port_range() {
+        assert_eq!(normalize_port("8080").unwrap(), "8080");
+        assert_eq!(normalize_port("3000-3010").unwrap(), "3000:3010");
+        assert_eq!(normalize_port("3000:3010").unwrap(), "3000:3010");
+        assert!(normalize_port("").is_err());
+        assert!(normalize_port("3010-3000").is_err());
+        assert!(normalize_port("abc").is_err());
+        assert!(normalize_port("0").is_err());
+    }
+
+    #[test]
+    fn csv_escapes_fields() {
+        let p = parse_ss_line(
+            "tcp LISTEN 0 4096 127.0.0.1:3060 0.0.0.0:* users:((\"node\",pid=1234,fd=3))",
+        )
+        .unwrap();
+        let csv = ports_to_csv(&[p]);
+        assert!(csv.starts_with("proto,local_addr,port,foreign_addr,state,pid,process\n"));
+        assert!(csv.contains("tcp,127.0.0.1,3060,0.0.0.0:*,LISTEN,1234,node\n"));
     }
 
     #[test]

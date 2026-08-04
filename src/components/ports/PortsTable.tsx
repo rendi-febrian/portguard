@@ -8,6 +8,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { PortInfo } from "../../lib/tauri";
+import { serviceName } from "../../lib/tauri";
 import { Badge, Button } from "../ui";
 
 export type SortKey =
@@ -136,7 +137,12 @@ function PortRow({ row, selected, onSelect, onKill }: RowProps) {
       <td className="px-3 py-2">
         <Badge tone={row.proto === "tcp" ? "tcp" : "udp"}>{row.proto}</Badge>
       </td>
-      <td className="px-3 py-2 font-mono font-semibold text-accent tabular-nums">{row.port}</td>
+      <td className="px-3 py-2">
+        <div className="font-mono font-semibold text-accent tabular-nums">{row.port}</div>
+        {serviceName(row.port) && (
+          <div className="text-2xs text-ink3">{serviceName(row.port)}</div>
+        )}
+      </td>
       <td className="px-3 py-2 font-mono text-ink2">{row.local_addr}</td>
       <td className="px-3 py-2 font-mono text-ink3">{row.foreign_addr || "—"}</td>
       <td className="px-3 py-2">
