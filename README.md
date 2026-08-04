@@ -42,11 +42,11 @@ Download from [GitHub Releases](https://github.com/rendi-febrian/portguard/relea
 
 ```bash
 # .deb package
-sudo dpkg -i PortGuard_0.2.1_amd64.deb
+sudo dpkg -i PortGuard_0.2.2_amd64.deb
 
 # or AppImage (no install needed)
-chmod +x PortGuard_0.2.1_amd64.AppImage
-./PortGuard_0.2.1_amd64.AppImage
+chmod +x PortGuard_0.2.2_amd64.AppImage
+./PortGuard_0.2.2_amd64.AppImage
 ```
 
 ### Windows
@@ -71,6 +71,31 @@ Download the `.dmg` from [GitHub Releases](https://github.com/rendi-febrian/port
 - `ss -tulpn` without root only shows PIDs of processes you own. Root/system processes (e.g. ports 22, 3306, 80) require Admin mode.
 - Some kernel-owned sockets (e.g. multicast `224.0.0.251:5353`) have no PID at all — that is expected.
 - Reading/writing `ufw` rules requires root: click **Load as admin**, or store your password in Settings.
+
+### Windows notes
+
+- Firewall operations (`Allow`, rule delete, enable/disable) require running PortGuard **as Administrator** — right-click → **Run as administrator**.
+- PIDs come from `netstat -ano`; process names are resolved via `tasklist`. UDP sockets are shown too.
+- Kill uses `taskkill /F`.
+
+### macOS notes
+
+- Port listing uses `lsof`. Firewall operations are not automated yet.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| PID column empty (Linux) | Enable **Admin** mode, or store a sudo password in Settings |
+| Firewall "needs root" (Linux) | Click **Load as admin**, or store a sudo password in Settings |
+| Firewall command fails (Windows) | Run PortGuard **as Administrator** |
+| SmartScreen warning (Windows) | Installers are unsigned — click **More info → Run anyway** |
+| Gatekeeper warning (macOS) | App is not notarized — right-click → **Open** |
+| Update check says "no release" | Make sure the tag/release was published (not a draft) and you have internet access |
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for the full history.
 
 ## Development
 
