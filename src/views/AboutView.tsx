@@ -76,7 +76,7 @@ export function AboutView() {
 
   const install = async () => {
     if (state.status !== "done" || state.kind !== "available" || !sys) return;
-    const asset = pickAsset(sys.os, sys.arch, state.version, state.assets);
+    const asset = pickAsset(sys.os, state.version, state.assets);
     if (!asset) {
       toast.error("No installer for this platform", `${sys.os} ${sys.arch} — download it from the release page.`);
       return;

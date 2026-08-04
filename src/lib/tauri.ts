@@ -300,23 +300,23 @@ export async function checkForUpdates(current: string): Promise<UpdateResult> {
   }
 }
 
-/** Pick the release asset that matches this OS/arch, preferring installers over portable builds. */
+/** Pick the release asset that matches this OS, preferring installers over portable builds. */
 export function pickAsset(
   os: string,
-  arch: string,
   version: string,
   assets: ReleaseAsset[],
 ): ReleaseAsset | null {
-  const a = arch === "x86_64" ? "amd64" : arch === "aarch64" ? "arm64" : arch;
-  const base = `PortGuard_${version}_${a}`;
   const wants: string[] =
     os === "linux"
       ? [".deb", ".AppImage"]
       : os === "windows"
         ? [".msi", ".exe"]
         : [".dmg"];
+  const prefix = `PortGuard_${version}_`;
   for (const ext of wants) {
-    const hit = assets.find((x) => x.name === `${base}${ext}`);
+    const hit = assets.find(
+      (a) => a.name.startsWith(prefix) && a.name.endsWith(ext) && !a.name.includes("blockmap"),
+    );
     if (hit) return hit;
   }
   return null;
