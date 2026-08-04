@@ -527,21 +527,30 @@ pub fn set_firewall_enabled(enabled: bool) -> Result<String, String> {
 /// All TCP/UDP sockets (listening + established), same parser as list_ports.
 #[tauri::command]
 pub fn list_connections(elevated: bool) -> Result<Vec<PortInfo>, String> {
-    let output = if elevated {
-        run_elevated("ss", &["-tunp"])?
-    } else {
-        run_output("ss", &["-tunp"])?
-    };
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    let mut out = Vec::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if let Some(p) = parse_ss_line(line) {
-            out.push(p);
+    #[cfg(target_os = "linux")]
+    {
+        let output = if elevated {
+            run_elevated("ss", &["-tunp"])?
+        } else {
+            run_output("ss", &["-tunp"])?
+        };
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
         }
+        let mut out = Vec::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Some(p) = parse_ss_line(line) {
+                out.push(p);
+            }
+        }
+        Ok(out)
     }
-    Ok(out)
+    #[cfg(not(target_os = "linux"))]
+    {
+        // netstat (Windows) / lsof (macOS) report all sockets already
+        let _ = elevated;
+        list_platform(false)
+    }
 }
 
 /// TCP connect probe — true if something answers on host:port within 1.5s.
