@@ -1,6 +1,6 @@
 [package]
 name = "portguard"
-version = "0.2.0"
+version = "0.2.1"
 description = "Network port manager for Linux, Windows & macOS"
 authors = ["Rendi Febrian"]
 edition = "2021"

@@ -42,16 +42,22 @@ Download from [GitHub Releases](https://github.com/rendi-febrian/portguard/relea
 
 ```bash
 # .deb package
-sudo dpkg -i PortGuard_0.1.0_amd64.deb
+sudo dpkg -i PortGuard_0.2.1_amd64.deb
 
 # or AppImage (no install needed)
-chmod +x PortGuard_0.1.0_amd64.AppImage
-./PortGuard_0.1.0_amd64.AppImage
+chmod +x PortGuard_0.2.1_amd64.AppImage
+./PortGuard_0.2.1_amd64.AppImage
 ```
 
-### Windows / macOS
+### Windows
 
-Build from source (see Development), or wait for an official release.
+Download the `.msi` or `.exe` installer from [GitHub Releases](https://github.com/rendi-febrian/portguard/releases). Installers are unsigned — Windows SmartScreen will show a warning; click **More info → Run anyway**.
+
+### macOS
+
+Download the `.dmg` from [GitHub Releases](https://github.com/rendi-febrian/portguard/releases). The app is not notarized, so macOS Gatekeeper will warn the first time — right-click → **Open** to bypass.
+
+> Releases are built automatically on GitHub Actions for Linux, Windows, and macOS when a `v*` tag is pushed.
 
 ## Usage
 
