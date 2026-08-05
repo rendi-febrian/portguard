@@ -1,6 +1,6 @@
 [package]
 name = "portguard"
-version = "0.2.2"
+version = "0.2.3"
 description = "Network port manager for Linux, Windows & macOS"
 authors = ["Rendi Febrian"]
 edition = "2021"
@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

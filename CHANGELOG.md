@@ -2,6 +2,11 @@
 
 All notable changes to PortGuard are documented here. Releases are built automatically for Linux, Windows, and macOS via GitHub Actions.
 
+## [0.2.3] - 2026
+
+### Fixed
+- **Duplicate instances**: launching PortGuard from the app menu/dock while it is already running in the tray now focuses the existing window instead of starting a second instance (`tauri-plugin-single-instance`).
+
 ## [0.2.2] - 2026
 
 ### Fixed
